@@ -1,0 +1,16 @@
+# ESP-IDF build output
+build/
+sdkconfig.old
+sdkconfig.bak
+
+# Component manager dependencies (downloaded on build)
+managed_components/
+
+# Dependency cache
+dependencies.lock.bak
+
+# Editor / OS
+.DS_Store
+*.swp
+*.swo
+*~

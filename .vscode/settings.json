@@ -1,0 +1,15 @@
+{
+  "idf.currentSetup": "/home/chaos/.espressif/v6.0/esp-idf",
+  "idf.customExtraVars": {},
+  "clangd.path": "/home/chaos/.espressif/tools/esp-clang/esp-20.1.1_20250829/esp-clang/bin/clangd",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=/home/chaos/esp/MP3Player/build"
+  ],
+  "idf.flashType": "UART",
+  "idf.openOcdConfigs": [
+    "board/esp32s3-builtin.cfg"
+  ],
+  "idf.port": "/dev/ttyACM0"
+}

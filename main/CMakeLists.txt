@@ -1,0 +1,34 @@
+idf_component_register(
+    SRCS
+        "app_main.c"
+        "storage/sd_card.c"
+        "storage/file_list.c"
+        "audio/i2s_output.c"
+        "audio/decoder.c"
+        "player/player.c"
+        "player/ringbuf.c"
+        "input/button.c"
+        "power/power.c"
+        "display/display.c"
+        "display/ui.c"
+        "display/cjk16.c"
+    REQUIRES
+        esp_driver_gpio
+        esp_driver_i2s
+        esp_driver_spi
+        sdmmc
+        fatfs
+        esp_lcd
+        espressif__esp_lvgl_port
+        lvgl__lvgl
+        espressif__esp_audio_codec
+    INCLUDE_DIRS
+        "."
+        "config"
+        "storage"
+        "audio"
+        "player"
+        "input"
+        "power"
+        "display"
+)
