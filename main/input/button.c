@@ -39,6 +39,43 @@ static bool is_volume_btn(int idx)
            buttons[idx].short_cmd == PLAYER_CMD_VOL_DOWN;
 }
 
+static bool is_prev_next_btn(int idx)
+{
+    return buttons[idx].short_cmd == PLAYER_CMD_PREV ||
+           buttons[idx].short_cmd == PLAYER_CMD_NEXT;
+}
+
+/* Long-press action for Prev/Next: toggle the full-screen song list. */
+static void handle_prev_next_longpress(int idx)
+{
+    ESP_LOGI(TAG, "long press btn %d, list_visible=%d", idx, ui_list_is_visible());
+    if (ui_list_is_visible()) {
+        ui_list_exit();
+    } else {
+        ui_list_enter();
+        ESP_LOGI(TAG, "after enter: list_visible=%d", ui_list_is_visible());
+    }
+}
+
+/* Short-press action while the song list is visible. */
+static void handle_short_press_in_list(int idx)
+{
+    player_cmd_t c = buttons[idx].short_cmd;
+    if (c == PLAYER_CMD_PREV) {
+        ui_list_move_up();
+    } else if (c == PLAYER_CMD_NEXT) {
+        ui_list_move_down();
+    } else if (c == PLAYER_CMD_TOGGLE) {
+        /* Play selected song and exit list.
+         * Send STOP first so playback restarts with the new file
+         * even if currently playing/paused. */
+        file_list_set_current(ui_list_get_selected());
+        ui_list_exit();
+        player_send_cmd(PLAYER_CMD_STOP);
+        player_send_cmd(PLAYER_CMD_PLAY);
+    }
+}
+
 static void button_task(void *arg)
 {
     ESP_LOGI(TAG, "button_task started on Core %d", xPortGetCoreID());
@@ -53,40 +90,42 @@ static void button_task(void *arg)
             bool cur_pressed = (level == 0);
 
             if (cur_pressed && !buttons[i].pressed) {
+                /* ── Button just pressed ── */
                 buttons[i].pressed = true;
                 buttons[i].press_start_ms = now;
                 buttons[i].long_press_sent = false;
                 buttons[i].last_repeat_ms = now;
             } else if (!cur_pressed && buttons[i].pressed) {
+                /* ── Button just released ── */
                 uint32_t held = now - buttons[i].press_start_ms;
                 if (held >= BTN_DEBOUNCE_MS && !buttons[i].long_press_sent) {
-                    /* In STOPPED state, Prev/Next browse the file list;
-                       in playing/paused they switch tracks. */
-                    player_cmd_t c = buttons[i].short_cmd;
-                    if (player_get_state() == PLAYER_STATE_STOPPED) {
-                        if (c == PLAYER_CMD_PREV) {
-                            ui_list_move_up();
-                        } else if (c == PLAYER_CMD_NEXT) {
-                            ui_list_move_down();
-                        } else if (c == PLAYER_CMD_TOGGLE) {
-                            /* Only select + enqueue here; the heavy fopen/
-                             * decoder_open runs in player_task (12 KB stack),
-                             * never in this button task. */
-                            file_list_set_current(ui_list_get_selected());
-                            ui_list_hide();
-                            player_send_cmd(PLAYER_CMD_PLAY);
+                    /* Short press action */
+                    if (ui_list_is_visible()) {
+                        handle_short_press_in_list(i);
+                    } else {
+                        /* Normal playback mode */
+                        player_cmd_t c = buttons[i].short_cmd;
+                        if (c == PLAYER_CMD_TOGGLE) {
+                            if (player_get_state() == PLAYER_STATE_STOPPED) {
+                                file_list_set_current(ui_list_get_selected());
+                            }
+                            player_send_cmd(c);
                         } else {
                             player_send_cmd(c);
                         }
-                    } else {
-                        player_send_cmd(c);
                     }
                 }
                 buttons[i].pressed = false;
             } else if (cur_pressed && buttons[i].pressed) {
+                /* ── Button held ── */
                 uint32_t held = now - buttons[i].press_start_ms;
                 if (held >= BTN_LONG_PRESS_MS && !buttons[i].long_press_sent) {
                     buttons[i].long_press_sent = true;
+                    /* Long-press action */
+                    if (is_prev_next_btn(i)) {
+                        handle_prev_next_longpress(i);
+                    }
+                    /* Volume keys start auto-repeat after long-press threshold */
                 }
                 /* Volume keys auto-repeat while held. */
                 if (is_volume_btn(i) && buttons[i].long_press_sent) {

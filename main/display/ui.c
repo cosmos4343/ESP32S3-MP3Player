@@ -14,15 +14,19 @@ static const char *TAG = "UI";
 
 static lv_obj_t *s_title_label    = NULL;
 static lv_obj_t *s_state_label    = NULL;
-static lv_obj_t *s_song_label      = NULL;
-static lv_obj_t *s_vol_label       = NULL;
-static lv_obj_t *s_vol_bar         = NULL;
-static lv_obj_t *s_progress_bar    = NULL;
-static lv_obj_t *s_time_label      = NULL;
-static lv_obj_t *s_file_list       = NULL;
+static lv_obj_t *s_song_label     = NULL;
+static lv_obj_t *s_vol_label     = NULL;
+static lv_obj_t *s_vol_bar        = NULL;
+static lv_obj_t *s_progress_bar   = NULL;
+static lv_obj_t *s_time_label     = NULL;
+
+/* Full-screen song list overlay */
+static lv_obj_t *s_list_scr       = NULL;  /* full-screen container */
+static lv_obj_t *s_list_title     = NULL;
+static lv_obj_t *s_list_widget    = NULL;
 
 static size_t s_list_selected = 0;
-static bool   s_list_visible = false;
+static bool   s_list_visible  = false;
 
 static const char *state_to_str(player_state_t s)
 {
@@ -67,21 +71,73 @@ static void display_name(const char *path, char *buf, size_t buf_size)
 
 static void refresh_file_list(void)
 {
-    if (!s_file_list) return;
-    lv_obj_clean(s_file_list);
+    if (!s_list_widget) return;
+    lv_obj_clean(s_list_widget);
     size_t total = file_list_count();
     for (size_t i = 0; i < total; i++) {
         const char *path = file_list_get(i);
         if (!path) continue;
         char name[MAX_FILE_PATH_LEN];
         display_name(path, name, sizeof(name));
-        lv_obj_t *btn = lv_list_add_button(s_file_list, NULL, name);
-        lv_obj_set_style_text_font(btn, &cjk16, 0);  /* list buttons override theme font */
+        /* Prefix with marker so selection is visible even if bg style fails */
+        char display[MAX_FILE_PATH_LEN + 4];
         if (i == s_list_selected) {
-            lv_obj_add_state(btn, LV_STATE_FOCUSED);
+            snprintf(display, sizeof(display), "> %s", name);
+        } else {
+            snprintf(display, sizeof(display), "  %s", name);
+        }
+        lv_obj_t *btn = lv_list_add_button(s_list_widget, NULL, display);
+        /* Set font on the child label (where text actually lives) */
+        lv_obj_t *label = lv_obj_get_child(btn, 0);
+        if (label) {
+            lv_obj_set_style_text_font(label, &cjk16, 0);
+            if (i == s_list_selected) {
+                lv_obj_set_style_text_color(label, lv_color_make(0x00, 0xFF, 0x00), 0);
+            }
+        }
+        if (i == s_list_selected) {
+            /* Bright blue background for the selected row */
+            lv_obj_set_style_bg_color(btn, lv_color_make(0x00, 0x80, 0xFF), 0);
+            lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_width(btn, 0, 0);
+            lv_obj_set_style_radius(btn, 0, 0);
+        }
+    }
+    /* Scroll the list so the selected item is visible */
+    uint32_t child_cnt = lv_obj_get_child_count(s_list_widget);
+    if (s_list_selected < child_cnt) {
+        lv_obj_t *sel_btn = lv_obj_get_child(s_list_widget, s_list_selected);
+        if (sel_btn) {
+            lv_obj_scroll_to_view(sel_btn, LV_ANIM_OFF);
         }
     }
 }
+
+/* ── Playback screen widgets ── */
+
+static void hide_playback_widgets(void)
+{
+    lv_obj_add_flag(s_title_label,   LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_state_label,   LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_song_label,    LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_vol_label,     LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_vol_bar,       LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_progress_bar,  LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_time_label,    LV_OBJ_FLAG_HIDDEN);
+}
+
+static void show_playback_widgets(void)
+{
+    lv_obj_clear_flag(s_title_label,   LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_state_label,   LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_song_label,    LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_vol_label,     LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_vol_bar,       LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_progress_bar,  LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_time_label,    LV_OBJ_FLAG_HIDDEN);
+}
+
+/* ── Public API ── */
 
 esp_err_t ui_init(void)
 {
@@ -102,7 +158,7 @@ esp_err_t ui_init(void)
     lv_obj_set_style_text_color(s_state_label, lv_color_make(0x80, 0xFF, 0x80), 0);
     lv_obj_align(s_state_label, LV_ALIGN_TOP_MID, 0, 40);
 
-    /* Song name label (visible when playing/paused). */
+    /* Song name label. */
     s_song_label = lv_label_create(scr);
     lv_label_set_text(s_song_label, "No file");
     lv_obj_set_style_text_color(s_song_label, lv_color_make(0xC0, 0xC0, 0xFF), 0);
@@ -137,14 +193,29 @@ esp_err_t ui_init(void)
     lv_obj_set_size(s_vol_bar, 200, 20);
     lv_obj_align(s_vol_bar, LV_ALIGN_TOP_LEFT, 20, 205);
 
-    /* File list (hidden initially; shown when STOPPED + browsing). */
-    s_file_list = lv_list_create(scr);
-    lv_obj_set_size(s_file_list, LCD_H_RES - 20, 90);
-    lv_obj_align(s_file_list, LV_ALIGN_BOTTOM_MID, 0, -10);
-    lv_obj_set_style_text_font(s_file_list, &cjk16, 0);  /* 中文歌名 */
-    lv_obj_add_flag(s_file_list, LV_OBJ_FLAG_HIDDEN);
+    /* ── Full-screen song list overlay (hidden until long-press) ── */
+    s_list_scr = lv_obj_create(scr);
+    lv_obj_remove_style_all(s_list_scr);
+    lv_obj_set_style_bg_color(s_list_scr, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_list_scr, LV_OPA_COVER, 0);
+    lv_obj_set_size(s_list_scr, LCD_H_RES, LCD_V_RES);
+    lv_obj_align(s_list_scr, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_clear_flag(s_list_scr, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_list_scr, LV_OBJ_FLAG_HIDDEN);
 
-    /* Pre-populate list contents so first time it's shown, it has data. */
+    /* List title */
+    s_list_title = lv_label_create(s_list_scr);
+    lv_label_set_text(s_list_title, "Song List");
+    lv_obj_set_style_text_color(s_list_title, lv_color_white(), 0);
+    lv_obj_set_style_text_font(s_list_title, &cjk16, 0);
+    lv_obj_align(s_list_title, LV_ALIGN_TOP_MID, 0, 6);
+
+    /* List widget (fills most of the screen) */
+    s_list_widget = lv_list_create(s_list_scr);
+    lv_obj_set_size(s_list_widget, LCD_H_RES - 8, LCD_V_RES - 50);
+    lv_obj_align(s_list_widget, LV_ALIGN_TOP_MID, 0, 30);
+    lv_obj_set_style_text_font(s_list_widget, &cjk16, 0);
+
     refresh_file_list();
 
     lvgl_port_unlock();
@@ -155,6 +226,7 @@ esp_err_t ui_init(void)
 void ui_update(void)
 {
     if (!s_state_label) return;
+    if (s_list_visible) return;  /* Don't update playback widgets while list is showing */
     if (!lvgl_port_lock(50)) return;
 
     lv_label_set_text(s_state_label, state_to_str(player_get_state()));
@@ -191,23 +263,32 @@ void ui_update(void)
     lvgl_port_unlock();
 }
 
-void ui_list_show(void)
+void ui_list_enter(void)
 {
-    if (!s_file_list) return;
+    if (!s_list_scr) return;
     if (!lvgl_port_lock(50)) return;
+    /* Start selection on the currently playing file */
+    s_list_selected = file_list_current_index();
     refresh_file_list();
-    lv_obj_clear_flag(s_file_list, LV_OBJ_FLAG_HIDDEN);
+    hide_playback_widgets();
+    lv_obj_clear_flag(s_list_scr, LV_OBJ_FLAG_HIDDEN);
     s_list_visible = true;
     lvgl_port_unlock();
 }
 
-void ui_list_hide(void)
+void ui_list_exit(void)
 {
-    if (!s_file_list) return;
+    if (!s_list_scr) return;
     if (!lvgl_port_lock(50)) return;
-    lv_obj_add_flag(s_file_list, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_list_scr, LV_OBJ_FLAG_HIDDEN);
+    show_playback_widgets();
     s_list_visible = false;
     lvgl_port_unlock();
+}
+
+bool ui_list_is_visible(void)
+{
+    return s_list_visible;
 }
 
 void ui_list_move_up(void)
@@ -216,7 +297,11 @@ void ui_list_move_up(void)
     if (total == 0) return;
     if (s_list_selected == 0) s_list_selected = total - 1;
     else s_list_selected--;
-    ui_list_show();
+    /* Refresh highlight */
+    if (s_list_visible && lvgl_port_lock(50)) {
+        refresh_file_list();
+        lvgl_port_unlock();
+    }
 }
 
 void ui_list_move_down(void)
@@ -224,7 +309,11 @@ void ui_list_move_down(void)
     size_t total = file_list_count();
     if (total == 0) return;
     s_list_selected = (s_list_selected + 1) % total;
-    ui_list_show();
+    /* Refresh highlight */
+    if (s_list_visible && lvgl_port_lock(50)) {
+        refresh_file_list();
+        lvgl_port_unlock();
+    }
 }
 
 size_t ui_list_get_selected(void)

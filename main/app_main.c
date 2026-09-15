@@ -23,20 +23,8 @@ static const char *TAG = "MAIN";
 
 static void monitor_task(void *arg)
 {
-    bool list_shown = false;
     while (1) {
-        player_state_t state = player_get_state();
-
         ui_update();
-
-        /* Toggle file list visibility based on state transitions. */
-        if (state == PLAYER_STATE_STOPPED && !list_shown) {
-            ui_list_show();
-            list_shown = true;
-        } else if (state != PLAYER_STATE_STOPPED && list_shown) {
-            ui_list_hide();
-            list_shown = false;
-        }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
@@ -74,9 +62,8 @@ void app_main(void)
             for (size_t i = 0; i < file_list_count() && i < 5; i++) {
                 ESP_LOGI(TAG, "  [%zu] %s", i, file_list_get(i));
             }
+            /* File list is hidden by default; user pops it up with Prev/Next. */
         }
-        /* Show file list on startup (state is STOPPED). */
-        ui_list_show();
     }
 
     ESP_ERROR_CHECK(i2s_output_init());
@@ -91,5 +78,5 @@ void app_main(void)
     xTaskCreatePinnedToCore(monitor_task, "monitor_task", MONITOR_TASK_STACK,
                             NULL, MONITOR_TASK_PRIO, NULL, 1);
 
-    ESP_LOGI(TAG, "All systems ready. Press Play to start.");
+    ESP_LOGI(TAG, "Ready. Long-press Prev/Next for song list.");
 }

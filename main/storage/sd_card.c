@@ -52,7 +52,7 @@ static esp_err_t try_mount_once(sdmmc_card_t **out_card)
     if (err != ESP_OK) {
         spi_bus_free(host.slot);
         return err;
-    }
+    } 
 
     *out_card = card;
     return ESP_OK;
